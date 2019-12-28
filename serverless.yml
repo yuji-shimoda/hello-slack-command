@@ -1,4 +1,4 @@
-service: hello
+service: async-hello
 provider:
   name: aws
   runtime: python3.7
@@ -12,17 +12,66 @@ provider:
         - "secretsmanager:GetSecretValue"
       Resource:
         - "*"
+    - Effect: "Allow"
+      Action:
+        - "states:StartExecution"
+      Resource:
+        - "*"
 plugins:
   - serverless-python-requirements
+  - serverless-step-functions
 functions:
   hello:
     handler: handler.request
     environment: 
       SLACK_API_SIGNING_SECRET: slack/secret
+      STATEMACHINE_ARN: 
+        Fn::Join:
+          - ':'
+          - 
+            - 'arn:aws:states'
+            - Ref: 'AWS::Region'
+            - Ref: 'AWS::AccountId'
+            - 'stateMachine'
+            - { "Fn::GetAtt": ["ResponseHello", "Name" ] }
     events:
       - http:
           path: '/'
           method: post
+  slack:
+    handler: slack.response
 custom:
   pythonRequirements:
     usePipenv: true
+stepFunctions:
+  stateMachines:
+    ResponseHello:
+      name: ResponseHello
+      definition:
+        Comment: "Slack command"
+        StartAt: ResponseMessage
+        States:
+          ResponseMessage:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [slack, Arn]
+            Retry:
+            - ErrorEquals:
+              - HandledError
+              IntervalSeconds: 1
+              MaxAttempts: 2
+              BackoffRate: 2
+            - ErrorEquals:
+              - States.TaskFailed
+              IntervalSeconds: 30
+              MaxAttempts: 2
+              BackoffRate: 2
+            - ErrorEquals:
+              - States.ALL
+              IntervalSeconds: 5
+              MaxAttempts: 5
+              BackoffRate: 2
+            Next: Done
+          Done:
+            Type: Pass
+            End: true

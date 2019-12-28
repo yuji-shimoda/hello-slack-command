@@ -9,6 +9,7 @@ import logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 TOKYO = 'ap-northeast-1'
+STATEMACHINE_ARN = os.environ['STATEMACHINE_ARN']
 # Get credentials
 secret_name = os.environ['SLACK_API_SIGNING_SECRET']
 secretsmanager = boto3.client('secretsmanager', region_name=TOKYO)
@@ -38,14 +39,28 @@ def verify(headers, body):
 def request(event, context):
     if verify(event['headers'], event['body']):
         text = parse.parse_qs(event['body'])['text'][0]
+        response_url = parse.parse_qs(event['body'])['response_url'][0]
         payload = {
-            "text": 'Hello' + text,
+            "message": 'Hello ' + text,
+            "response_url": response_url
         }
-        response = {
-            "statusCode": 200,
-            "body": json.dumps(payload)
-        }
-        return response
+        try:
+            sfn = boto3.client('stepfunctions', region_name=TOKYO)
+            sfn.start_execution(
+                stateMachineArn=STATEMACHINE_ARN,
+                input=json.dumps(payload)
+            )
+        except Exception as e:
+            logger.exception("sfn start_execution {}".format(e))
+        else:
+            payload = {
+                "text": 'しばらくお待ち下さい',
+            }
+            response = {
+                "statusCode": 200,
+                "body": json.dumps(payload)
+            }
+            return response
     else:
         logger.info("Error: verify request")
         return {"statusCode": 400}
